@@ -93,6 +93,27 @@ def check_command_exists(cmd: str) -> bool:
     return result.returncode == 0
 
 
+def get_prowlarr_api_key(config_path: str) -> str | None:
+    """Read the actual API key from Prowlarr's config.xml."""
+    config_file = Path(config_path) / "prowlarr" / "config.xml"
+
+    if not config_file.exists():
+        return None
+
+    try:
+        import xml.etree.ElementTree as ET
+
+        tree = ET.parse(config_file)
+        root = tree.getroot()
+        api_key_elem = root.find("ApiKey")
+        if api_key_elem is not None and api_key_elem.text:
+            return api_key_elem.text
+    except Exception:
+        pass
+
+    return None
+
+
 def get_configuration() -> Config:
     """Prompt user for configuration values."""
     console.print(
@@ -301,6 +322,22 @@ def create_directories(config: Config):
     )
 
 
+def get_docker_compose_cmd() -> list[str]:
+    """Get the correct docker compose command for this system."""
+    # Try new plugin syntax first
+    result = subprocess.run(["docker", "compose", "version"], capture_output=True)
+    if result.returncode == 0:
+        return ["docker", "compose"]
+
+    # Fall back to old standalone command
+    result = subprocess.run(["docker-compose", "version"], capture_output=True)
+    if result.returncode == 0:
+        return ["docker-compose"]
+
+    # Default to new syntax
+    return ["docker", "compose"]
+
+
 def start_containers(project_dir: Path):
     """Start Docker containers."""
     console.print()
@@ -312,14 +349,44 @@ def start_containers(project_dir: Path):
         )
     )
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("[cyan]Starting containers...", total=None)
-        subprocess.run(["docker", "compose", "up", "-d"], cwd=project_dir, check=True)
-        progress.update(task, description="[green]✓ Containers started")
+    docker_compose = get_docker_compose_cmd()
+
+    # List of container names to manage
+    container_names = [
+        "plex",
+        "prowlarr",
+        "flaresolverr",
+        "radarr",
+        "sonarr",
+        "qbittorrent",
+    ]
+
+    # First, forcefully stop and remove any existing containers with these names
+    console.print("  [cyan]○[/] Removing existing containers (if any)...")
+    for name in container_names:
+        subprocess.run(["docker", "stop", name], capture_output=True)
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+
+    # Also run docker-compose down to clean up networks
+    subprocess.run(
+        docker_compose + ["down", "--remove-orphans"],
+        cwd=project_dir,
+        capture_output=True,
+    )
+    console.print("  [green]✓[/] Existing containers removed")
+
+    # Now start fresh
+    console.print("  [cyan]○[/] Starting containers...")
+    result = subprocess.run(
+        docker_compose + ["up", "-d"], cwd=project_dir, capture_output=True, text=True
+    )
+
+    if result.returncode == 0:
+        console.print("  [green]✓[/] Containers started")
+    else:
+        console.print(f"  [red]✗[/] Error starting containers:")
+        console.print(f"      {result.stderr.strip()}")
+        raise RuntimeError("Failed to start containers")
 
 
 def wait_for_service(url: str, name: str, timeout: int = 120) -> bool:
@@ -383,8 +450,18 @@ def configure_prowlarr_flaresolverr(config: Config) -> bool:
         )
     )
 
+    # Read the actual API key from Prowlarr's config.xml
+    actual_api_key = get_prowlarr_api_key(config.base_config_path)
+
+    if not actual_api_key:
+        console.print("  [yellow]⚠[/] Could not read Prowlarr API key from config")
+        console.print("      [dim]Prowlarr may need manual configuration[/]")
+        return False
+
+    console.print(f"  [green]✓[/] Found Prowlarr API key: {actual_api_key[:8]}...")
+
     base_url = f"http://localhost:{config.prowlarr_port}"
-    headers = {"X-Api-Key": config.prowlarr_api_key, "Content-Type": "application/json"}
+    headers = {"X-Api-Key": actual_api_key, "Content-Type": "application/json"}
 
     # Wait a bit more for Prowlarr to fully initialize
     time.sleep(3)
