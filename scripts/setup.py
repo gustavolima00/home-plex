@@ -355,7 +355,7 @@ def preconfigure_apps(config: Config):
   <EnableSsl>False</EnableSsl>
   <LaunchBrowser>False</LaunchBrowser>
   <ApiKey>{config.prowlarr_api_key}</ApiKey>
-  <AuthenticationMethod>None</AuthenticationMethod>
+  <AuthenticationMethod>Forms</AuthenticationMethod>
   <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
   <Branch>master</Branch>
   <LogLevel>info</LogLevel>
