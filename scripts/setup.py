@@ -322,6 +322,96 @@ def create_directories(config: Config):
     )
 
 
+def preconfigure_apps(config: Config):
+    """Pre-configure app config files before containers start."""
+    console.print()
+    console.print(
+        Panel.fit(
+            "[bold white]Pre-configuring applications...[/]",
+            title="[bold white]⚙️ Pre-Configuration[/]",
+            border_style="cyan",
+        )
+    )
+
+    config_path = Path(config.base_config_path)
+
+    # Config template for *arr apps (Prowlarr, Radarr, Sonarr)
+    # AuthenticationRequired = DisabledForLocalAddresses allows local network access without auth
+    arr_apps = [
+        ("prowlarr", 9696, 6969, "Prowlarr"),
+        ("radarr", 7878, 9898, "Radarr"),
+        ("sonarr", 8989, 9898, "Sonarr"),
+    ]
+
+    for app_name, port, ssl_port, instance_name in arr_apps:
+        config_file = config_path / app_name / "config.xml"
+
+        # Only create if doesn't exist (don't overwrite existing config)
+        if not config_file.exists():
+            config_xml = f"""<Config>
+  <BindAddress>*</BindAddress>
+  <Port>{port}</Port>
+  <SslPort>{ssl_port}</SslPort>
+  <EnableSsl>False</EnableSsl>
+  <LaunchBrowser>False</LaunchBrowser>
+  <ApiKey>{config.prowlarr_api_key}</ApiKey>
+  <AuthenticationMethod>None</AuthenticationMethod>
+  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+  <Branch>master</Branch>
+  <LogLevel>info</LogLevel>
+  <SslCertPath></SslCertPath>
+  <SslCertPassword></SslCertPassword>
+  <UrlBase></UrlBase>
+  <InstanceName>{instance_name}</InstanceName>
+  <UpdateMechanism>Docker</UpdateMechanism>
+</Config>
+"""
+            config_file.write_text(config_xml)
+            console.print(f"  [green]✓[/] Pre-configured {instance_name}")
+        else:
+            console.print(f"  [blue]ℹ[/] {instance_name} already configured")
+
+    # Pre-configure qBittorrent
+    qbit_config_dir = config_path / "qbittorrent" / "qBittorrent"
+    qbit_config_dir.mkdir(parents=True, exist_ok=True)
+    qbit_config_file = qbit_config_dir / "qBittorrent.conf"
+
+    if not qbit_config_file.exists():
+        # Create qBittorrent config with WebUI credentials
+        qbit_conf = f"""[AutoRun]
+enabled=false
+
+[BitTorrent]
+Session\\AddTorrentStopped=false
+Session\\DefaultSavePath=/data/torrents/
+Session\\Port=6881
+Session\\QueueingSystemEnabled=true
+Session\\TempPath=/data/torrents/incomplete/
+
+[LegalNotice]
+Accepted=true
+
+[Preferences]
+Connection\\PortRangeMin=6881
+Downloads\\SavePath=/data/torrents/
+Downloads\\TempPath=/data/torrents/incomplete/
+WebUI\\Address=*
+WebUI\\AuthSubnetWhitelist=0.0.0.0/0
+WebUI\\AuthSubnetWhitelistEnabled=true
+WebUI\\LocalHostAuth=false
+WebUI\\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHAjU9b3b7uB8NR1Gez+RmMRN0bQVpKyOGPUgHR6Eb4TdDCfJJNwcLJbL0UGJ9zJePP1w==)"
+WebUI\\Port=8080
+WebUI\\ServerDomains=*
+WebUI\\Username={config.admin_user}
+"""
+        qbit_config_file.write_text(qbit_conf)
+        console.print(
+            f"  [green]✓[/] Pre-configured qBittorrent (user: {config.admin_user}, pass: adminadmin)"
+        )
+    else:
+        console.print(f"  [blue]ℹ[/] qBittorrent already configured")
+
+
 def get_docker_compose_cmd() -> list[str]:
     """Get the correct docker compose command for this system."""
     # Try new plugin syntax first
@@ -619,6 +709,9 @@ def main():
 
     # Create directories
     create_directories(config)
+
+    # Pre-configure apps before starting containers
+    preconfigure_apps(config)
 
     # Start containers
     start_containers(project_dir)
