@@ -1,7 +1,7 @@
 #!/bin/bash
 #===============================================================================
-#  HOME-PLEX INSTALLER
-#  Installs uv if needed and runs the Python setup
+#  HOME-PLEX UNINSTALLER
+#  Installs uv if needed and runs the uninstall script
 #===============================================================================
 
 set -e
@@ -12,10 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if ! command -v uv &> /dev/null; then
     echo "📦 Installing uv..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    
-    # Add to PATH for this session
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Run the setup script with uv
-exec uv run "$SCRIPT_DIR/scripts/setup.py"
+# Run the uninstall script with uv
+exec uv run "$SCRIPT_DIR/scripts/uninstall.py"
