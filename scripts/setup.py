@@ -312,6 +312,7 @@ def create_directories(config: Config):
     # Data directories
     for subdir in [
         "media/movies",
+        "media/filmes",
         "media/series",
         "media/tv",
         "torrents/movies",
@@ -776,27 +777,30 @@ def configure_radarr_sonarr(config: Config):
             response = requests.get(root_url, headers=headers, timeout=10)
             existing_roots = response.json() if response.status_code == 200 else []
 
-            target_path = (
-                "/data/media/movies" if app_id == "radarr" else "/data/media/series"
+            target_paths = (
+                ["/data/media/movies", "/data/media/filmes"]
+                if app_id == "radarr"
+                else ["/data/media/series"]
             )
 
-            if not any(r.get("path") == target_path for r in existing_roots):
-                root_data = {"path": target_path}
-                response = requests.post(
-                    root_url, headers=headers, json=root_data, timeout=10
-                )
-                if response.status_code in [200, 201]:
-                    console.print(
-                        f"  [green]✓[/] Root folder registered: {target_path}"
+            for target_path in target_paths:
+                if not any(r.get("path") == target_path for r in existing_roots):
+                    root_data = {"path": target_path}
+                    response = requests.post(
+                        root_url, headers=headers, json=root_data, timeout=10
                     )
+                    if response.status_code in [200, 201]:
+                        console.print(
+                            f"  [green]✓[/] Root folder registered: {target_path}"
+                        )
+                    else:
+                        console.print(
+                            f"  [yellow]⚠[/] Failed to register root folder: {response.text}"
+                        )
                 else:
                     console.print(
-                        f"  [yellow]⚠[/] Failed to register root folder: {response.text}"
+                        f"  [blue]ℹ[/] Root folder {target_path} already registered"
                     )
-            else:
-                console.print(
-                    f"  [blue]ℹ[/] Root folder {target_path} already registered"
-                )
         except Exception as e:
             console.print(
                 f"  [yellow]⚠[/] Error configuring root folder for {name}: {e}"
