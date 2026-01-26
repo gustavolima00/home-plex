@@ -162,74 +162,78 @@ def install_dependencies():
             border_style="cyan",
         )
     )
+    console.print()
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
+    # Update package lists
+    console.print("  [cyan]○[/] Updating package lists...")
+    result = subprocess.run(
+        ["sudo", "apt-get", "update"], capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        console.print("  [green]✓[/] Package lists updated")
+    else:
+        console.print("  [yellow]⚠[/] Package update had warnings (continuing...)")
 
-        # Update package lists
-        task = progress.add_task("[cyan]Updating package lists...", total=None)
-        run_command(["apt-get", "update", "-qq"], sudo=True)
-        progress.update(task, description="[green]✓ Package lists updated")
+    # Install prerequisites
+    console.print("  [cyan]○[/] Installing prerequisites...")
+    subprocess.run(
+        [
+            "sudo",
+            "apt-get",
+            "install",
+            "-y",
+            "apt-transport-https",
+            "ca-certificates",
+            "curl",
+            "gnupg",
+            "lsb-release",
+            "jq",
+        ],
+        capture_output=True,
+    )
+    console.print("  [green]✓[/] Prerequisites installed")
 
-        # Install prerequisites
-        task = progress.add_task("[cyan]Installing prerequisites...", total=None)
-        run_command(
-            [
-                "apt-get",
-                "install",
-                "-y",
-                "-qq",
-                "apt-transport-https",
-                "ca-certificates",
-                "curl",
-                "gnupg",
-                "lsb-release",
-                "jq",
-            ],
-            sudo=True,
+    # Install Docker
+    if not check_command_exists("docker"):
+        console.print("  [cyan]○[/] Installing Docker (this may take a minute)...")
+        subprocess.run(
+            "curl -fsSL https://get.docker.com | sudo sh",
+            shell=True,
+            capture_output=True,
         )
-        progress.update(task, description="[green]✓ Prerequisites installed")
 
-        # Install Docker
-        if not check_command_exists("docker"):
-            task = progress.add_task("[cyan]Installing Docker...", total=None)
+        # Add user to docker group
+        user = os.environ.get("USER", "")
+        if user and user != "root":
             subprocess.run(
-                "curl -fsSL https://get.docker.com | sudo sh", shell=True, check=True
+                ["sudo", "usermod", "-aG", "docker", user], capture_output=True
             )
 
-            # Add user to docker group
-            user = os.environ.get("USER", "")
-            if user and user != "root":
-                run_command(["usermod", "-aG", "docker", user], sudo=True)
+        console.print("  [green]✓[/] Docker installed")
+    else:
+        console.print("  [green]✓[/] Docker already installed")
 
-            progress.update(task, description="[green]✓ Docker installed")
-        else:
-            progress.add_task("[green]✓ Docker already installed", total=1, completed=1)
+    # Check Docker Compose
+    docker_compose_exists = (
+        check_command_exists("docker-compose")
+        or subprocess.run(
+            ["docker", "compose", "version"], capture_output=True
+        ).returncode
+        == 0
+    )
 
-        # Check Docker Compose
-        docker_compose_exists = (
-            check_command_exists("docker-compose")
-            or subprocess.run(
-                ["docker", "compose", "version"], capture_output=True
-            ).returncode
-            == 0
+    if not docker_compose_exists:
+        console.print("  [cyan]○[/] Installing Docker Compose...")
+        subprocess.run(
+            ["sudo", "apt-get", "install", "-y", "docker-compose-plugin"],
+            capture_output=True,
         )
+        console.print("  [green]✓[/] Docker Compose installed")
+    else:
+        console.print("  [green]✓[/] Docker Compose already installed")
 
-        if not docker_compose_exists:
-            task = progress.add_task("[cyan]Installing Docker Compose...", total=None)
-            run_command(
-                ["apt-get", "install", "-y", "-qq", "docker-compose-plugin"], sudo=True
-            )
-            progress.update(task, description="[green]✓ Docker Compose installed")
-        else:
-            progress.add_task(
-                "[green]✓ Docker Compose already installed", total=1, completed=1
-            )
-
-    console.print("  [green]✓[/] All dependencies installed!")
+    console.print()
+    console.print("  [bold green]✓ All dependencies installed![/]")
 
 
 def create_env_file(config: Config, project_dir: Path):
