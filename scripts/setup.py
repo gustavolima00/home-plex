@@ -310,7 +310,13 @@ def create_directories(config: Config):
     config_path = Path(config.base_config_path)
 
     # Data directories
-    for subdir in ["media/movies", "media/tv", "torrents/movies", "torrents/tv"]:
+    for subdir in [
+        "media/movies",
+        "media/series",
+        "media/tv",
+        "torrents/movies",
+        "torrents/tv",
+    ]:
         (data_path / subdir).mkdir(parents=True, exist_ok=True)
     console.print(f"  [green]✓[/] Created media directories at [magenta]{data_path}[/]")
 
@@ -764,6 +770,255 @@ def configure_radarr_sonarr(config: Config):
         except Exception as e:
             console.print(f"  [yellow]⚠[/] Error configuring {name}: {e}")
 
+        # 4. Configure Root Folder
+        try:
+            root_url = f"{base_url}/api/v3/rootfolder"
+            response = requests.get(root_url, headers=headers, timeout=10)
+            existing_roots = response.json() if response.status_code == 200 else []
+
+            target_path = (
+                "/data/media/movies" if app_id == "radarr" else "/data/media/series"
+            )
+
+            if not any(r.get("path") == target_path for r in existing_roots):
+                root_data = {"path": target_path}
+                response = requests.post(
+                    root_url, headers=headers, json=root_data, timeout=10
+                )
+                if response.status_code in [200, 201]:
+                    console.print(
+                        f"  [green]✓[/] Root folder registered: {target_path}"
+                    )
+                else:
+                    console.print(
+                        f"  [yellow]⚠[/] Failed to register root folder: {response.text}"
+                    )
+            else:
+                console.print(
+                    f"  [blue]ℹ[/] Root folder {target_path} already registered"
+                )
+        except Exception as e:
+            console.print(
+                f"  [yellow]⚠[/] Error configuring root folder for {name}: {e}"
+            )
+
+
+def configure_prowlarr_indexers(config: Config):
+    """Add popular public indexers to Prowlarr."""
+    console.print()
+    console.print(
+        Panel.fit(
+            "[bold white]Adding Prowlarr Indexers...[/]",
+            title="[bold white]🌐 Indexers Configuration[/]",
+            border_style="cyan",
+        )
+    )
+
+    api_key = get_arr_api_key(config.base_config_path, "prowlarr")
+    if not api_key:
+        console.print("  [yellow]⚠[/] Could not read Prowlarr API key")
+        return
+
+    base_url = f"http://localhost:{config.prowlarr_port}"
+    headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
+
+    indexers = [
+        {
+            "name": "1337x",
+            "implementation": "Cardigann",
+            "fields": [{"name": "baseUrl", "value": "https://1337x.to"}],
+        },
+        {
+            "name": "TorrentGalaxy",  # Prowlarr name is TorrentGalaxyClone
+            "implementation": "Cardigann",
+            "fields": [{"name": "baseUrl", "value": "https://torrentgalaxy.to"}],
+        },
+        {
+            "name": "LimeTorrents",
+            "implementation": "Cardigann",
+            "fields": [{"name": "baseUrl", "value": "https://www.limetorrents.info"}],
+        },
+    ]
+
+    try:
+        idx_url = f"{base_url}/api/v1/indexer"
+        response = requests.get(idx_url, headers=headers, timeout=10)
+        existing_indexers = response.json() if response.status_code == 200 else []
+
+        # Get all available schemas once
+        schema_all_url = f"{base_url}/api/v1/indexer/schema"
+        schema_all_resp = requests.get(schema_all_url, headers=headers, timeout=10)
+        all_schemas = (
+            schema_all_resp.json() if schema_all_resp.status_code == 200 else []
+        )
+
+        for idx in indexers:
+            # Check if already exists (case insensitive)
+            if not any(
+                i.get("name", "").lower() == idx["name"].lower()
+                for i in existing_indexers
+            ):
+                # Find the schema
+                data = next(
+                    (
+                        s
+                        for s in all_schemas
+                        if s.get("name", "").lower() == idx["name"].lower()
+                    ),
+                    None,
+                )
+
+                # Special case for TorrentGalaxyClone
+                if not data and idx["name"] == "TorrentGalaxy":
+                    data = next(
+                        (
+                            s
+                            for s in all_schemas
+                            if s.get("name", "").lower() == "torrentgalaxyclone"
+                        ),
+                        None,
+                    )
+
+                if data:
+                    data["name"] = idx["name"]
+                    data["enable"] = True
+                    data["appProfileId"] = 1  # Set standard app profile
+
+                    # Update fields from our template
+                    for f_override in idx["fields"]:
+                        for field in data.get("fields", []):
+                            if field["name"] == f_override["name"]:
+                                field["value"] = f_override["value"]
+
+                    # Ensure FlareSolverr tag is applied if it exists
+                    tag_url = f"{base_url}/api/v1/tag"
+                    tag_resp = requests.get(tag_url, headers=headers, timeout=10)
+                    if tag_resp.status_code == 200:
+                        tags = tag_resp.json()
+                        fs_tag = next(
+                            (t for t in tags if t["label"].lower() == "flaresolverr"),
+                            None,
+                        )
+                        if fs_tag:
+                            data["tags"] = [fs_tag["id"]]
+
+                    response = requests.post(
+                        idx_url, headers=headers, json=data, timeout=10
+                    )
+                    if response.status_code in [200, 201]:
+                        console.print(f"  [green]✓[/] Added indexer: {idx['name']}")
+                    else:
+                        console.print(
+                            f"  [yellow]⚠[/] Failed to add {idx['name']}: {response.text}"
+                        )
+            else:
+                console.print(f"  [blue]ℹ[/] Indexer {idx['name']} already exists")
+    except Exception as e:
+        console.print(f"  [yellow]⚠[/] Error configuring indexers: {e}")
+
+    except Exception as e:
+        console.print(f"  [yellow]⚠[/] Error configuring indexers: {e}")
+
+
+def configure_prowlarr_apps(config: Config):
+    """Register Radarr and Sonarr as applications in Prowlarr for indexer sync."""
+    console.print()
+    console.print(
+        Panel.fit(
+            "[bold white]Syncing Indexers with Apps...[/]",
+            title="[bold white]🔄 Prowlarr App Sync[/]",
+            border_style="cyan",
+        )
+    )
+
+    prowlarr_api_key = get_arr_api_key(config.base_config_path, "prowlarr")
+    if not prowlarr_api_key:
+        console.print("  [yellow]⚠[/] Could not read Prowlarr API key")
+        return
+
+    base_url = f"http://localhost:{config.prowlarr_port}"
+    headers = {"X-Api-Key": prowlarr_api_key, "Content-Type": "application/json"}
+
+    apps = [
+        {
+            "name": "Radarr",
+            "implementation": "Radarr",
+            "configContract": "RadarrSettings",
+            "baseUrl": "http://radarr:7878",
+            "app_id": "radarr",
+        },
+        {
+            "name": "Sonarr",
+            "implementation": "Sonarr",
+            "configContract": "SonarrSettings",
+            "baseUrl": "http://sonarr:8989",
+            "app_id": "sonarr",
+        },
+    ]
+
+    try:
+        # Check existing applications
+        app_url = f"{base_url}/api/v1/applications"
+        response = requests.get(app_url, headers=headers, timeout=10)
+        existing_apps = response.json() if response.status_code == 200 else []
+
+        for app_info in apps:
+            if not any(a.get("name") == app_info["name"] for a in existing_apps):
+                app_api_key = get_arr_api_key(
+                    config.base_config_path, app_info["app_id"]
+                )
+                if not app_api_key:
+                    console.print(
+                        f"  [yellow]⚠[/] Could not read {app_info['name']} API key"
+                    )
+                    continue
+
+                # Get schema from Prowlarr
+                schema_url = f"{base_url}/api/v1/applications/schema"
+                schema_resp = requests.get(schema_url, headers=headers, timeout=10)
+                if schema_resp.status_code == 200:
+                    schemas = schema_resp.json()
+                    data = next(
+                        (
+                            s
+                            for s in schemas
+                            if s.get("implementation") == app_info["implementation"]
+                        ),
+                        None,
+                    )
+
+                    if data:
+                        data["name"] = app_info["name"]
+                        data["syncLevel"] = "fullSync"
+
+                        # Update fields
+                        for field in data.get("fields", []):
+                            if field["name"] == "prowlarrUrl":
+                                field["value"] = "http://prowlarr:9696"
+                            elif field["name"] == "baseUrl":
+                                field["value"] = app_info["baseUrl"]
+                            elif field["name"] == "apiKey":
+                                field["value"] = app_api_key
+
+                        response = requests.post(
+                            app_url, headers=headers, json=data, timeout=10
+                        )
+                        if response.status_code in [200, 201]:
+                            console.print(
+                                f"  [green]✓[/] Registered {app_info['name']} in Prowlarr"
+                            )
+                        else:
+                            console.print(
+                                f"  [yellow]⚠[/] Failed to register {app_info['name']}: {response.text}"
+                            )
+            else:
+                console.print(
+                    f"  [blue]ℹ[/] {app_info['name']} already registered in Prowlarr"
+                )
+
+    except Exception as e:
+        console.print(f"  [yellow]⚠[/] Error syncing Prowlarr apps: {e}")
+
 
 def print_summary(config: Config):
     """Print the final summary."""
@@ -894,6 +1149,12 @@ def main():
 
     # Configure Prowlarr with FlareSolverr
     configure_prowlarr_flaresolverr(config)
+
+    # Configure Prowlarr Indexers
+    configure_prowlarr_indexers(config)
+
+    # Sync Prowlarr with Radarr and Sonarr
+    configure_prowlarr_apps(config)
 
     # Configure Radarr and Sonarr
     configure_radarr_sonarr(config)
