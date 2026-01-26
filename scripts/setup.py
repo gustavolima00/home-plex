@@ -93,9 +93,9 @@ def check_command_exists(cmd: str) -> bool:
     return result.returncode == 0
 
 
-def get_prowlarr_api_key(config_path: str) -> str | None:
-    """Read the actual API key from Prowlarr's config.xml."""
-    config_file = Path(config_path) / "prowlarr" / "config.xml"
+def get_arr_api_key(config_path: str, app_name: str) -> str | None:
+    """Read the actual API key from an *arr app's config.xml."""
+    config_file = Path(config_path) / app_name / "config.xml"
 
     if not config_file.exists():
         return None
@@ -402,6 +402,7 @@ WebUI\\LocalHostAuth=false
 WebUI\\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHAjU9b3b7uB8NR1Gez+RmMRN0bQVpKyOGPUgHR6Eb4TdDCfJJNwcLJbL0UGJ9zJePP1w==)"
 WebUI\\Port=8080
 WebUI\\ServerDomains=*
+WebUI\\HostHeaderValidation=false
 WebUI\\Username={config.admin_user}
 """
         qbit_config_file.write_text(qbit_conf)
@@ -541,7 +542,7 @@ def configure_prowlarr_flaresolverr(config: Config) -> bool:
     )
 
     # Read the actual API key from Prowlarr's config.xml
-    actual_api_key = get_prowlarr_api_key(config.base_config_path)
+    actual_api_key = get_arr_api_key(config.base_config_path, "prowlarr")
 
     if not actual_api_key:
         console.print("  [yellow]⚠[/] Could not read Prowlarr API key from config")
@@ -636,6 +637,134 @@ def configure_prowlarr_flaresolverr(config: Config) -> bool:
         return False
 
 
+def configure_radarr_sonarr(config: Config):
+    """Configure Radarr and Sonarr settings (download clients, renamer, etc.)."""
+    apps = [
+        ("Radarr", config.radarr_port, "radarr"),
+        ("Sonarr", config.sonarr_port, "sonarr"),
+    ]
+
+    for name, port, app_id in apps:
+        console.print()
+        console.print(
+            Panel.fit(
+                f"[bold white]Configuring {name}...[/]",
+                title=f"[bold white]🔧 {name} Configuration[/]",
+                border_style="cyan",
+            )
+        )
+
+        api_key = get_arr_api_key(config.base_config_path, app_id)
+        if not api_key:
+            console.print(f"  [yellow]⚠[/] Could not read {name} API key from config")
+            continue
+
+        base_url = f"http://localhost:{port}"
+        headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
+
+        # 1. Configure qBittorrent as download client
+        try:
+            dc_url = f"{base_url}/api/v3/downloadclient"
+            response = requests.get(dc_url, headers=headers, timeout=10)
+            existing_clients = response.json() if response.status_code == 200 else []
+
+            qbit_client = next(
+                (c for c in existing_clients if c.get("name") == "qBittorrent"), None
+            )
+
+            if not qbit_client:
+                qbit_data = {
+                    "name": "qBittorrent",
+                    "implementation": "QBitTorrent",
+                    "configContract": "QBitTorrentSettings",
+                    "fields": [
+                        {"name": "host", "value": "qbittorrent"},
+                        {"name": "port", "value": 8080},
+                        {"name": "username", "value": config.admin_user},
+                        {
+                            "name": "password",
+                            "value": "adminadmin",
+                        },  # Default qbit pass from preconfig
+                    ],
+                    "enable": True,
+                    "priority": 1,
+                }
+                response = requests.post(
+                    dc_url, headers=headers, json=qbit_data, timeout=10
+                )
+                if response.status_code in [200, 201]:
+                    console.print(
+                        "  [green]✓[/] qBittorrent configured as download client"
+                    )
+                else:
+                    console.print(
+                        f"  [yellow]⚠[/] Failed to configure qBittorrent: {response.text}"
+                    )
+            else:
+                console.print(
+                    "  [blue]ℹ[/] qBittorrent already configured as download client"
+                )
+
+            # 2. Configure Remote Path Mapping
+            rpm_url = f"{base_url}/api/v3/remotepathmapping"
+            response = requests.get(rpm_url, headers=headers, timeout=10)
+            existing_mappings = response.json() if response.status_code == 200 else []
+
+            if not existing_mappings:
+                rpm_data = {
+                    "host": "qbittorrent",
+                    "remotePath": "/data/torrents/",
+                    "localPath": "/data/torrents/",
+                }
+                response = requests.post(
+                    rpm_url, headers=headers, json=rpm_data, timeout=10
+                )
+                if response.status_code in [200, 201]:
+                    console.print("  [green]✓[/] Remote path mapping configured")
+                else:
+                    console.print(
+                        f"  [yellow]⚠[/] Failed to configure remote path mapping: {response.text}"
+                    )
+            else:
+                console.print("  [blue]ℹ[/] Remote path mapping already exists")
+
+            # 3. Configure Media Management (Renaming)
+            naming_url = f"{base_url}/api/v3/config/naming"
+            response = requests.get(naming_url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                naming_config = response.json()
+                modified = False
+
+                if app_id == "radarr":
+                    if not naming_config.get("renameMovies"):
+                        naming_config["renameMovies"] = True
+                        modified = True
+                else:  # sonarr
+                    if not naming_config.get("renameEpisodes"):
+                        naming_config["renameEpisodes"] = True
+                        modified = True
+
+                if modified:
+                    response = requests.put(
+                        naming_url, headers=headers, json=naming_config, timeout=10
+                    )
+                    if response.status_code in [200, 201, 202]:
+                        console.print(
+                            "  [green]✓[/] Media management (renaming) enabled"
+                        )
+                    else:
+                        console.print(
+                            f"  [yellow]⚠[/] Failed to enable renaming: {response.text}"
+                        )
+                else:
+                    console.print(
+                        "  [blue]ℹ[/] Media management (renaming) already enabled"
+                    )
+
+        except Exception as e:
+            console.print(f"  [yellow]⚠[/] Error configuring {name}: {e}")
+
+
 def print_summary(config: Config):
     """Print the final summary."""
     console.print()
@@ -682,19 +811,63 @@ def print_summary(config: Config):
 
 def main():
     """Main entry point."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Home-Plex Server Setup")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Run in non-interactive mode using .env values",
+    )
+    args = parser.parse_args()
+
     # Get project directory
     script_dir = Path(__file__).parent
     project_dir = script_dir.parent
 
     # Clear screen and show banner
-    console.clear()
+    if not args.auto:
+        console.clear()
     print_banner()
 
     # Get configuration
-    config = get_configuration()
+    if args.auto:
+        env_path = project_dir / ".env"
+        if not env_path.exists():
+            console.print(f"[red]✗[/] .env file not found. Cannot run in --auto mode.")
+            sys.exit(1)
+
+        # Very simple .env parser
+        env_vars = {}
+        with open(env_path, "r") as f:
+            for line in f:
+                if "=" in line and not line.startswith("#"):
+                    key, value = line.strip().split("=", 1)
+                    env_vars[key] = value
+
+        config = Config(
+            admin_user=env_vars.get("ADMIN_USER", "admin"),
+            admin_pass=env_vars.get("ADMIN_PASS", "admin"),
+            prowlarr_api_key=env_vars.get("PROWLARR_API_KEY", ""),
+            base_data_path=env_vars.get("BASE_DATA_PATH", ""),
+            base_config_path=env_vars.get("BASE_CONFIG_PATH", ""),
+            plex_port=int(env_vars.get("PLEX_PORT", 32400)),
+            prowlarr_port=int(env_vars.get("PROWLARR_PORT", 9696)),
+            flaresolverr_port=int(env_vars.get("FLARESOLVERR_PORT", 8191)),
+            radarr_port=int(env_vars.get("RADARR_PORT", 7878)),
+            sonarr_port=int(env_vars.get("SONARR_PORT", 8989)),
+            qbit_webui_port=int(env_vars.get("QBIT_WEBUI_PORT", 8090)),
+            qbit_port=int(env_vars.get("QBIT_PORT", 6881)),
+            puid=int(env_vars.get("PUID", os.getuid())),
+            pgid=int(env_vars.get("PGID", os.getgid())),
+        )
+        console.print("[yellow]ℹ[/] Running in AUTO mode using .env values")
+    else:
+        config = get_configuration()
 
     # Install dependencies
-    install_dependencies()
+    if not args.auto:
+        install_dependencies()
 
     # Create environment file
     console.print()
@@ -721,6 +894,9 @@ def main():
 
     # Configure Prowlarr with FlareSolverr
     configure_prowlarr_flaresolverr(config)
+
+    # Configure Radarr and Sonarr
+    configure_radarr_sonarr(config)
 
     # Print summary
     print_summary(config)
