@@ -40,6 +40,7 @@ class Config:
     base_config_path: str = ""
     plex_port: int = 32400
     prowlarr_port: int = 9696
+    overseerr_port: int = 5055
     flaresolverr_port: int = 8191
     radarr_port: int = 7878
     sonarr_port: int = 8989
@@ -160,6 +161,9 @@ def get_configuration() -> Config:
 
     config.plex_port = int(Prompt.ask("  [cyan]➜[/] Plex port", default="32400"))
     config.prowlarr_port = int(Prompt.ask("  [cyan]➜[/] Prowlarr port", default="9696"))
+    config.overseerr_port = int(
+        Prompt.ask("  [cyan]➜[/] Overseerr port", default="5055")
+    )
     config.flaresolverr_port = int(
         Prompt.ask("  [cyan]➜[/] FlareSolverr port", default="8191")
     )
@@ -283,6 +287,7 @@ PROWLARR_API_KEY={config.prowlarr_api_key}
 # Service Ports
 PLEX_PORT={config.plex_port}
 PROWLARR_PORT={config.prowlarr_port}
+OVERSEERR_PORT={config.overseerr_port}
 FLARESOLVERR_PORT={config.flaresolverr_port}
 RADARR_PORT={config.radarr_port}
 SONARR_PORT={config.sonarr_port}
@@ -322,7 +327,7 @@ def create_directories(config: Config):
     console.print(f"  [green]✓[/] Created media directories at [magenta]{data_path}[/]")
 
     # Config directories
-    for app in ["plex", "prowlarr", "radarr", "sonarr", "qbittorrent"]:
+    for app in ["plex", "prowlarr", "overseerr", "radarr", "sonarr", "qbittorrent"]:
         (config_path / app).mkdir(parents=True, exist_ok=True)
     console.print(
         f"  [green]✓[/] Created config directories at [magenta]{config_path}[/]"
@@ -453,6 +458,7 @@ def start_containers(project_dir: Path):
     container_names = [
         "plex",
         "prowlarr",
+        "overseerr",
         "flaresolverr",
         "radarr",
         "sonarr",
@@ -516,6 +522,7 @@ def wait_for_services(config: Config):
 
     services = [
         ("Prowlarr", f"http://localhost:{config.prowlarr_port}"),
+        ("Overseerr", f"http://localhost:{config.overseerr_port}"),
         ("Radarr", f"http://localhost:{config.radarr_port}"),
         ("Sonarr", f"http://localhost:{config.sonarr_port}"),
         ("qBittorrent", f"http://localhost:{config.qbit_webui_port}"),
@@ -538,7 +545,12 @@ def wait_for_services(config: Config):
 
 
 def configure_prowlarr_flaresolverr(config: Config) -> bool:
-    """Configure FlareSolverr in Prowlarr."""
+    # Configure Radarr/Sonarr
+    configure_radarr_sonarr(config)
+
+    # Display Overseerr Help
+    display_overseerr_help(config)
+
     console.print()
     console.print(
         Panel.fit(
@@ -642,6 +654,68 @@ def configure_prowlarr_flaresolverr(config: Config) -> bool:
         console.print(f"  [yellow]⚠[/] Error configuring FlareSolverr: {e}")
         console.print("      [dim]You may need to configure this manually[/]")
         return False
+
+
+def display_overseerr_help(config: Config):
+    """Display helper information for setting up Overseerr."""
+    console.print()
+    console.print(
+        Panel.fit(
+            "[bold white]Use these details to configure Overseerr services manually.[/]",
+            title="[bold white]ℹ️  Overseerr Setup Helper[/]",
+            border_style="cyan",
+        )
+    )
+
+    # Get Prowlarr API Key
+    prowlarr_key = (
+        get_arr_api_key(config.base_config_path, "prowlarr")
+        or "UNKNOWN (Check config.xml)"
+    )
+
+    # Get Radarr API Key
+    radarr_key = (
+        get_arr_api_key(config.base_config_path, "radarr")
+        or "UNKNOWN (Check config.xml)"
+    )
+
+    # Get Sonarr API Key
+    sonarr_key = (
+        get_arr_api_key(config.base_config_path, "sonarr")
+        or "UNKNOWN (Check config.xml)"
+    )
+
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="bold cyan", justify="right")
+    grid.add_column(style="white")
+
+    grid.add_row("[underline]Radarr Connection[/]", "")
+    grid.add_row("Hostname:", "radarr")
+    grid.add_row("Port:", str(config.radarr_port))
+    grid.add_row("API Key:", radarr_key)
+    grid.add_row("", "")
+
+    grid.add_row("[underline]Sonarr Connection[/]", "")
+    grid.add_row("Hostname:", "sonarr")
+    grid.add_row("Port:", str(config.sonarr_port))
+    grid.add_row("API Key:", sonarr_key)
+    grid.add_row("", "")
+
+    grid.add_row("[underline]Prowlarr Connection[/]", "")
+    grid.add_row("Hostname:", "prowlarr")
+    grid.add_row("Port:", str(config.prowlarr_port))
+    grid.add_row("API Key:", prowlarr_key)
+
+    console.print(
+        Panel(
+            grid,
+            title="[bold yellow]Copy these values into Overseerr[/]",
+            border_style="yellow",
+        )
+    )
+    console.print(
+        f"  [dim]Overseerr is available at: http://localhost:{config.overseerr_port}[/]"
+    )
 
 
 def configure_radarr_sonarr(config: Config):

@@ -26,6 +26,19 @@ services:
       - ${PROWLARR_PORT:-9696}:9696
     restart: unless-stopped
 
+  overseerr:
+    image: lscr.io/linuxserver/overseerr:latest
+    container_name: overseerr
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/Sao_Paulo}
+    volumes:
+      - ${BASE_CONFIG_PATH}/overseerr:/config
+    ports:
+      - ${OVERSEERR_PORT:-5055}:5055
+    restart: unless-stopped
+
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr

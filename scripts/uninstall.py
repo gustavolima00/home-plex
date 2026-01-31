@@ -55,7 +55,15 @@ def print_banner():
 
 def get_container_status() -> list[tuple[str, str, str]]:
     """Get status of home-plex containers."""
-    containers = ["plex", "prowlarr", "flaresolverr", "radarr", "sonarr", "qbittorrent"]
+    containers = [
+        "plex",
+        "prowlarr",
+        "overseerr",
+        "flaresolverr",
+        "radarr",
+        "sonarr",
+        "qbittorrent",
+    ]
     statuses = []
 
     for name in containers:
@@ -166,6 +174,7 @@ def main():
             images = [
                 "lscr.io/linuxserver/plex",
                 "lscr.io/linuxserver/prowlarr",
+                "lscr.io/linuxserver/overseerr",
                 "lscr.io/linuxserver/radarr",
                 "lscr.io/linuxserver/sonarr",
                 "lscr.io/linuxserver/qbittorrent",
