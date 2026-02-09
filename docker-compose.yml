@@ -45,7 +45,6 @@ services:
     ports:
       - ${FLARESOLVERR_PORT:-8191}:8191
     restart: unless-stopped
-
   radarr:
     image: lscr.io/linuxserver/radarr:latest
     container_name: radarr
@@ -86,4 +85,15 @@ services:
       - ${QBIT_WEBUI_PORT:-8080}:8080
       - ${QBIT_PORT:-6881}:6881
       - ${QBIT_PORT:-6881}:6881/udp
+    restart: unless-stopped
+
+  dashy:
+    image: lissy93/dashy:latest
+    container_name: dashy
+    volumes:
+      - ${BASE_CONFIG_PATH}/dashy/conf.yml:/app/user-data/conf.yml
+    ports:
+      - ${DASHY_PORT:-4000}:8080
+    environment:
+      - NODE_ENV=production
     restart: unless-stopped

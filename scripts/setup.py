@@ -46,6 +46,7 @@ class Config:
     sonarr_port: int = 8989
     qbit_webui_port: int = 8090
     qbit_port: int = 6881
+    dashy_port: int = 4000
     puid: int = field(default_factory=lambda: os.getuid())
     pgid: int = field(default_factory=lambda: os.getgid())
 
@@ -173,6 +174,8 @@ def get_configuration() -> Config:
         Prompt.ask("  [cyan]➜[/] qBittorrent WebUI port", default="8090")
     )
     config.qbit_port = int(Prompt.ask("  [cyan]➜[/] qBittorrent port", default="6881"))
+    config.dashy_port = int(Prompt.ask("  [cyan]➜[/] Dashy port", default="4000"))
+
 
     return config
 
@@ -367,7 +370,7 @@ def preconfigure_apps(config: Config):
   <EnableSsl>False</EnableSsl>
   <LaunchBrowser>False</LaunchBrowser>
   <ApiKey>{config.prowlarr_api_key}</ApiKey>
-  <AuthenticationMethod>Forms</AuthenticationMethod>
+  <AuthenticationMethod>None</AuthenticationMethod>
   <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
   <Branch>master</Branch>
   <LogLevel>info</LogLevel>
@@ -463,7 +466,9 @@ def start_containers(project_dir: Path):
         "radarr",
         "sonarr",
         "qbittorrent",
+        "dashy",
     ]
+
 
     # First, forcefully stop and remove any existing containers with these names
     console.print("  [cyan]○[/] Removing existing containers (if any)...")
@@ -482,7 +487,7 @@ def start_containers(project_dir: Path):
     # Now start fresh
     console.print("  [cyan]○[/] Starting containers...")
     result = subprocess.run(
-        docker_compose + ["up", "-d"], cwd=project_dir, capture_output=True, text=True
+        docker_compose + ["up", "-d"], cwd=project_dir, capture_output=False, text=True
     )
 
     if result.returncode == 0:
@@ -526,7 +531,9 @@ def wait_for_services(config: Config):
         ("Radarr", f"http://localhost:{config.radarr_port}"),
         ("Sonarr", f"http://localhost:{config.sonarr_port}"),
         ("qBittorrent", f"http://localhost:{config.qbit_webui_port}"),
+        ("Dashy", f"http://localhost:{config.dashy_port}"),
     ]
+
 
     with Progress(
         SpinnerColumn(),
@@ -1121,6 +1128,7 @@ def print_summary(config: Config):
     services_table.add_column("URL", style="yellow")
 
     services_table.add_row("Plex", f"http://localhost:{config.plex_port}/web")
+    services_table.add_row("Overseerr", f"http://localhost:{config.overseerr_port}")
     services_table.add_row("Prowlarr", f"http://localhost:{config.prowlarr_port}")
     services_table.add_row("Radarr", f"http://localhost:{config.radarr_port}")
     services_table.add_row("Sonarr", f"http://localhost:{config.sonarr_port}")
@@ -1128,6 +1136,8 @@ def print_summary(config: Config):
     services_table.add_row(
         "FlareSolverr", f"http://localhost:{config.flaresolverr_port}"
     )
+    services_table.add_row("Dashy", f"http://localhost:{config.dashy_port}")
+
 
     console.print(services_table)
     console.print()
@@ -1191,7 +1201,9 @@ def main():
             sonarr_port=int(env_vars.get("SONARR_PORT", 8989)),
             qbit_webui_port=int(env_vars.get("QBIT_WEBUI_PORT", 8090)),
             qbit_port=int(env_vars.get("QBIT_PORT", 6881)),
+            dashy_port=int(env_vars.get("DASHY_PORT", 4000)),
             puid=int(env_vars.get("PUID", os.getuid())),
+
             pgid=int(env_vars.get("PGID", os.getgid())),
         )
         console.print("[yellow]ℹ[/] Running in AUTO mode using .env values")
